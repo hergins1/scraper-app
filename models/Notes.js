@@ -1,0 +1,1 @@
+//mongoose schema needed to created note layout

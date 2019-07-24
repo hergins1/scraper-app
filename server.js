@@ -1,50 +1,121 @@
 const express = require("express");
-const mongojs = require("mongojs");
 const axios = require("axios");
 const cherrio = require("cheerio");
+const logger = require("morgan");
+const mongoose = require("mongoose");
+const exphbs = require('express-handlebars');
+let path = require("path");
+
+const db = require(".models");
 
 const PORT = 3000;
 
 const app = express();
 
+const MONGODB_URI = process.env.MONGODB_URI;
+
+app.use(logger("dev"));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 app.use(express.static("public"));
 
-const databaseUrl = "scraper"
-const collections = ["scrapedData"];
+app.engine(
+    'handlebars',
+    exphbs({
+        defaultLayout: 'main'
+    })
+);
 
-const db = mongojs(databaseUrl, collections);
-db.on("error", function(error){
-    console.log("Database Error: ", error);
-});
+app.set('view engine', 'handlebars');
 
-app.get("/", function(req, res){
-    res.send("Testing");
-});
+mongoose.connect(MONGODB_URI, { useNewUrlParser: true });
 
-app.get("/all", function(req, res){
-    db.scrapedData.find({}, function(error, found){
-        if (error){
+app.get("/all", function (req, res) {
+    db.scrapedData.find({}, function (error, found) {
+        if (error) {
             console.log(error)
         }
-        else{
+        else {
             res.json(found);
         }
     });
 });
 
-app.get("/scrape", function(req, res){
-    
+app.get("/scrape", function (req, res) {
+
     axios.get("https://fox4kc.com/category/news/")
-    .then(function(response){
-        let $ = cheerio.load(response.data);
-        let result = [];
-        
-        $("li.story").each(function(i, element){
-            let img = $(element).find("a").find("img").attr("src");
-            let link = $(element);
-            let title = $(element);
+        .then(function (response) {
+            let $ = cheerio.load(response.data);
+            let result = [];
+
+            $("li.story").each(function (i, element) {
+                let img = $(element).find("a").find("img").attr("src");
+                let link = $(element).find("a");
+                let title = $(element).find("h4").find("a").text();
+            })
+
+            if (img && link && title) {
+                result.push({
+                    title: title,
+                    img: img,
+                    link: link
+                })
+            }
+        });
+
+    db.Articles.create(results)
+        .then(function (dbArticle) {
+            console.log(dbArticle)
+            res.redirect("/")
         })
-    })
+        .catch(function (err) {
+            console.log(err);
+            res.send(err)
+        })
 })
+
+app.get('/articles', function (req, res) {
+
+    db.Articles.find({ "saved": false })
+        .then(function (dbArticle) {
+
+            res.json(dbArticle);
+        })
+        .catch(function (err) {
+
+            res.json(err);
+        });
+});
+
+
+app.get('/delete', function (req, res) {
+
+    db.Article.remove({}, function (error, response) {
+
+        if (error) {
+            console.log(error);
+            res.send(error);
+        }
+        else {
+            res.redirect("/");
+        }
+    });
+});
+
+app.post("/articles/save/:id", function (req, res) {
+    db.Article.findOneAndUpdate({ _id: req.params.id }, { "saved": true })
+        .then(function (dbArticle) {
+            res.json(dbArticle);
+        })
+        .catch(function (err) {
+            res.json(err);
+        });
+});
+
+app.get("/", function (req, res) {
+    res.render("index");
+});
+
+app.listen(PORT, function () {
+    console.log("App running on port " + PORT + "!");
+});
